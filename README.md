@@ -3,13 +3,13 @@
 Root-adb recovery for the **onn 4K Pro Streaming Device** (codename `jarvis2`,
 Amlogic S905X5M, Android 14).
 
-There is no TWRP or other custom recovery for this box. This repo patches the
-**stock** recovery so that booting into it gives you a root `adb shell` with no
-authorization prompt, plus `busybox` and `magiskboot`. That is enough to dump
-and restore partitions and to repair a system that no longer boots.
+This project patches the stock recovery to provide a root ADB shell with
+`busybox` and `magiskboot`. Recovery ADB currently accepts USB hosts without
+authorization. Anyone with USB access while recovery is running can use that
+root shell.
 
-It is a patched stock recovery, not TWRP: the on-screen menu is unchanged and
-`adb sideload` still only accepts zips signed by the manufacturer.
+By default, sideload uses the manufacturer's signing certificates. The optional
+sideload setup adds a certificate for packages you sign yourself.
 
 ## Requirements
 
@@ -19,7 +19,10 @@ It is a patched stock recovery, not TWRP: the on-screen menu is unchanged and
   `/data/adb/magisk`
 - `adb` on your computer, device booted into normal Android with USB debugging on
 
-Nothing else is needed on the host. All image work happens on the device.
+- Bash and `sha256sum` on the host
+- Python 3 and OpenSSL on the host if using `sideload-enable` or signing packages
+
+Image repacking runs on the device.
 
 ## Usage
 
@@ -63,7 +66,7 @@ and checks that the normal-boot ramdisk, the DTB, the bootconfig and the header
 are byte-identical to stock, and that the image size is unchanged. `flash`
 reads the partition back and compares its SHA-256 with the built image.
 
-## Installing your own (unsigned) zips
+## Installing packages signed with your own key
 
 Stock recovery only installs zips signed by the manufacturer. `sideload-enable`
 adds **your own** signing key to recovery's `otacerts.zip` (keeping the stock
@@ -90,8 +93,11 @@ recovery's verification is disabled.
   so fastboot is not needed.
 - If recovery fails to start, power-cycle the box. It boots normal Android,
   where `./jarvis2-recovery.sh restore` puts the stock image back.
-- A system update (OTA) replaces `vendor_boot` and removes the patch. Run
-  `flash` again afterwards; it builds from the new stock image.
+- Keep each stock backup labeled with its firmware build and slot. Before
+  restoring, confirm the backup matches the build and active slot. The restore
+  command can reuse the cached device copy.
+- After an OTA, obtain a fresh stock image for the new build and active slot
+  before rebuilding. Do not reuse a cached image from the previous build.
 - Flashing boot images always carries some risk. You do this at your own risk.
 
 ## Tested on
