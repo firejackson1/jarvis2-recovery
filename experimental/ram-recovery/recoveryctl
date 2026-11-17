@@ -1,0 +1,63 @@
+#!/bin/sh
+# Read-only convenience interface. Root can override kernel write protection;
+# this utility and the init script are safeguards, not a root security boundary.
+set -eu
+SYS=/sys
+DEV=/dev
+fail() { echo "recoveryctl: $*" >&2; exit 1; }
+internal_partition() {
+    node=${1##*/}
+    [ -f "$1/partition" ] || return 1
+    disk=${node%p*}
+    [ "$(cat "$SYS/class/block/$disk/device/type" 2>/dev/null)" = MMC ]
+}
+select_partition() {
+    case "$1" in ''|*[!A-Za-z0-9_-]*) fail 'supply a partition label, not a path';; esac
+    selected=
+    for part in "$SYS"/class/block/mmcblk*p*; do
+        internal_partition "$part" || continue
+        label=$(sed -n 's/^PARTNAME=//p' "$part/uevent")
+        [ "$label" = "$1" ] || continue
+        [ -z "$selected" ] || fail "ambiguous partition label: $1"
+        selected="$DEV/${part##*/}"
+    done
+    [ -n "$selected" ] || fail "internal partition not found: $1"
+    [ -b "$selected" ] || fail 'selected node is not a block device'
+    [ "$(blockdev --getro "$selected")" = 1 ] || fail 'device is not read-only; refusing access'
+}
+case "${1:-help}" in
+    partitions)
+        [ "$#" = 1 ] || fail 'usage: recoveryctl partitions'
+        printf 'LABEL\tNODE\tSECTORS_512\tREAD_ONLY\n'
+        for part in "$SYS"/class/block/mmcblk*p*; do
+            internal_partition "$part" || continue
+            label=$(sed -n 's/^PARTNAME=//p' "$part/uevent")
+            printf '%s\t%s\t%s\t%s\n' "${label:-(unlabelled)}" "$DEV/${part##*/}" \
+                "$(cat "$part/size")" "$(blockdev --getro "$DEV/${part##*/}" 2>/dev/null || echo unknown)"
+        done
+        ;;
+    backup|hash)
+        [ "$#" = 2 ] || fail 'usage: recoveryctl backup|hash PARTITION_LABEL'
+        select_partition "$2"
+        if [ "$1" = hash ]; then exec sha256sum "$selected"; fi
+        # Binary stdout goes directly to the SSH client. Never open an output disk.
+        exec dd if="$selected" bs=1048576
+        ;;
+    status)
+        [ "$#" = 1 ] || fail 'usage: recoveryctl status'
+        uname -a
+        cat /etc/jarvis-recovery-release
+        ip -4 address show dev eth0
+        cat /proc/mounts
+        ;;
+    reboot)
+        [ "$#" = 1 ] || fail 'usage: recoveryctl reboot'
+        sync
+        exec reboot -f
+        ;;
+    help)
+        echo 'recoveryctl status | partitions | hash LABEL | backup LABEL | reboot'
+        echo 'backup writes raw bytes to stdout; redirect SSH output on your computer.'
+        ;;
+    *) fail 'unknown operation (no flash, restore, wipe, or repair commands)' ;;
+esac
