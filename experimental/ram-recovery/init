@@ -1,0 +1,78 @@
+#!/bin/busybox sh
+BB=/bin/busybox
+$BB mount -t tmpfs -o mode=755 tmpfs /dev
+$BB mknod /dev/null c 1 3
+$BB mknod /dev/zero c 1 5
+$BB mknod /dev/random c 1 8
+$BB mknod /dev/urandom c 1 9
+$BB mknod /dev/kmsg c 1 11
+$BB mknod /dev/console c 5 1
+$BB chmod 666 /dev/null /dev/zero /dev/random /dev/urandom
+exec >/dev/kmsg 2>&1
+$BB mount -t proc proc /proc
+$BB mount -t sysfs sysfs /sys
+$BB --install -s /bin
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export HOME=/root TERM=vt100
+mkdir -p /run /tmp /dev/pts /etc/dropbear
+chmod 1777 /tmp
+mount -t devpts -o mode=620,ptmxmode=666 devpts /dev/pts
+ln -sf pts/ptmx /dev/ptmx
+hostname jarvis2-recovery
+echo 'JARVIS2 RAM RECOVERY 0.1 - EXPERIMENTAL'
+# This covers failed module loading and DHCP. It is not a hardware watchdog:
+# a completely stalled kernel cannot execute this fallback.
+(sleep 300; [ -f /run/recovery.ready ] || reboot -f) &
+protect_storage() {
+    found=0
+    for disk in /sys/class/block/mmcblk*; do
+        [ "$(cat "$disk/device/type" 2>/dev/null)" = MMC ] || continue
+        found=1
+        for node in /dev/"${disk##*/}"*; do
+            [ -b "$node" ] || continue
+            blockdev --setro "$node" || return 1
+            [ "$(blockdev --getro "$node")" = 1 ] || return 1
+        done
+        [ -b "/dev/${disk##*/}" ] || return 1
+    done
+    [ "$found" = 1 ]
+}
+while read -r module; do
+    [ -n "$module" ] || continue
+    insmod "/lib/modules/$module" || echo "Module load failed: $module"
+    if [ "$module" = amlogic-mmc.ko ]; then
+        mdev -s
+        protect_storage || echo 'eMMC not yet ready; access remains unavailable'
+    fi
+done </modules.load
+sleep 2
+mdev -s
+if ! protect_storage; then
+    echo 'Cannot verify eMMC read-only protection. Returning to Android.'
+    sleep 10
+    reboot -f
+    while :; do sleep 60; done
+fi
+if [ ! -s /root/.ssh/authorized_keys ]; then
+    echo 'No authorized SSH key. Waiting for fallback reboot.'
+    while :; do sleep 60; done
+fi
+ip link set lo up
+ip link set eth0 up
+if udhcpc -i eth0 -n -t 10 -T 3 -p /run/udhcpc.pid &&
+   ip -4 address show dev eth0 | grep -q 'inet '; then
+    # Keep DHCP running for lease renewal. Password authentication and forwarding
+    # are disabled. Dropbear generates fresh host keys inside RAM on first use.
+    dropbear -R -F -E -s -j -k -l eth0 -p 22 >/run/dropbear.log 2>&1 &
+    server=$!
+    sleep 2
+    if kill -0 "$server" 2>/dev/null; then
+        touch /run/recovery.ready
+        echo 'Recovery SSH ready; all internal eMMC block nodes read-only.'
+        ip -4 address show dev eth0
+        wait "$server"
+        echo 'SSH server exited. Returning to Android.'
+        reboot -f
+    fi
+fi
+while :; do sleep 60; done
