@@ -14,6 +14,7 @@ usage: $0 <command>
 
   build     back up stock vendor_boot, build the patched image (no flashing)
   flash     build, then write the patched image to the active slot
+  sideload-enable  add your own signing key so self-signed zips install via sideload
   restore   write the stock backup back to the active slot
   status    show what is currently on the device
 
@@ -87,6 +88,32 @@ write_part() {  # $1 = image path on device
     echo "wrote and verified $PART"
 }
 
+sideload_enable() {
+    local keydir="$HERE/sideload-key"
+    [ -f "$keydir/cert.pem" ] || "$HERE/tools/make-sideload-key.sh" "$keydir"
+    # pull the stock OTA certs out of the current recovery and merge in our cert
+    su_ "mkdir -p $WORK"
+    "${ADB[@]}" push "$HERE/device/build.sh" /data/local/tmp/j2-build.sh >/dev/null
+    su_ "mv /data/local/tmp/j2-build.sh $WORK/build.sh"
+    # need a stock.img first (build() makes the backup and exports stock-otacerts.zip)
+    build
+    "${ADB[@]}" exec-out "su -c 'cat $WORK/stock-otacerts.zip'" > "$HERE/sideload-key/stock-otacerts.zip"
+    python3 "$HERE/tools/build-otacerts.py" "$HERE/sideload-key/stock-otacerts.zip" \
+        "$keydir/cert.pem" "$HERE/sideload-key/otacerts.zip"
+    "${ADB[@]}" push "$HERE/sideload-key/otacerts.zip" /data/local/tmp/j2-otc.zip >/dev/null
+    su_ "mv /data/local/tmp/j2-otc.zip $WORK/otacerts.zip"
+    # rebuild now WITH the otacerts injected, then flash
+    "${ADB[@]}" shell "su -c 'WORK=$WORK sh $WORK/build.sh'" || die "build failed"
+    OUT="$HERE/out/vendor_boot${SLOT}-rootadb-sideload-${BUILD}.img"
+    mkdir -p "$HERE/out"; "${ADB[@]}" exec-out "su -c 'cat $WORK/new.img'" > "$OUT"
+    write_part "$WORK/new.img"
+    cat <<MSG
+done. your signing key is in $keydir (keep key.pem private).
+sign a zip:   tools/sign-zip.py in.zip out.zip --key $keydir/key.pem --cert $keydir/cert.pem
+install it:   adb reboot sideload && adb sideload out.zip
+MSG
+}
+
 case "${1:-}" in
 build)
     preflight; build ;;
@@ -94,6 +121,8 @@ flash)
     preflight; build
     write_part "$WORK/new.img"
     echo "done. test with: adb reboot recovery && adb shell id" ;;
+sideload-enable)
+    preflight; sideload_enable ;;
 restore)
     preflight
     su_ "test -f $WORK/stock.img" || {

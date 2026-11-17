@@ -56,11 +56,31 @@ the fragment used for normal boot. Only the recovery fragment is modified:
 | `system/etc/init/hw/init.rc` | adbd `--root_seclabel=u:r:su:s0` → `u:r:adbd:s0` | user builds have no `su` SELinux domain; adbd would abort |
 | `sepolicy` | `permissive adbd`, `permissive shell` | lets the root shell read and write block devices |
 | `system/bin/busybox`, `system/bin/magiskboot` | added | tools for working inside recovery |
+| `system/etc/security/otacerts.zip` | *(only with `sideload-enable`)* your cert added next to the stock one | lets your self-signed zips install, OTAs still verify |
 
 Before anything is written, `device/build.sh` unpacks the repacked image again
 and checks that the normal-boot ramdisk, the DTB, the bootconfig and the header
 are byte-identical to stock, and that the image size is unchanged. `flash`
 reads the partition back and compares its SHA-256 with the built image.
+
+## Installing your own (unsigned) zips
+
+Stock recovery only installs zips signed by the manufacturer. `sideload-enable`
+adds **your own** signing key to recovery's `otacerts.zip` (keeping the stock
+certs, so official OTAs still verify), then you sign zips with that key:
+
+```sh
+./jarvis2-recovery.sh sideload-enable          # generates sideload-key/, flashes
+# then, for any zip you want to install:
+tools/sign-zip.py in.zip out.zip \
+    --key sideload-key/key.pem --cert sideload-key/cert.pem
+adb reboot sideload && adb sideload out.zip
+```
+
+`sideload-key/key.pem` is your private key — keep it; anyone with it can sign
+zips your box will trust. It is git-ignored. The signing uses the AOSP
+whole-file (OTA) signature format that `otautil/verifier.cpp` checks; no part of
+recovery's verification is disabled.
 
 ## Safety
 

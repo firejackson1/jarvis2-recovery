@@ -32,7 +32,8 @@ mkdir w
 "$MB" cpio "$C" \
     "extract prop.default w/prop.default" \
     "extract system/etc/init/hw/init.rc w/init.rc" \
-    "extract sepolicy w/sepolicy"
+    "extract sepolicy w/sepolicy" \
+    "extract system/etc/security/otacerts.zip $WORK/stock-otacerts.zip"
 
 if grep -q '^ro\.debuggable=1$' w/prop.default; then
     echo "this image is already patched; start from a stock vendor_boot"
@@ -62,6 +63,12 @@ grep -q 'root_seclabel=u:r:adbd:s0' w/init.rc
     "add 0644 sepolicy w/sepolicy.new" \
     "add 0755 system/bin/busybox $MAGISK/busybox" \
     "add 0755 system/bin/magiskboot $MB"
+
+# optional: replace recovery's OTA signing certs (for self-signed sideload zips)
+if [ -f "$WORK/otacerts.zip" ]; then
+    "$MB" cpio "$C" "add 0644 system/etc/security/otacerts.zip $WORK/otacerts.zip"
+    echo "injected $WORK/otacerts.zip"
+fi
 rm -rf w
 
 # --- repack -----------------------------------------------------------------
