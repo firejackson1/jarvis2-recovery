@@ -116,6 +116,13 @@ On that build the patched image is reproducible:
 Firmware images are not included in this repo; the scripts build from the
 image on your own device.
 
+## Experimental standalone recovery
+
+A separate [RAM recovery prototype](experimental/ram-recovery/README.md) adds
+key-only SSH, diagnostics and read-only partition backups. It builds a temporary
+boot image and does not modify this stock-recovery patcher. Hardware boot
+validation of that prototype is pending.
+
 ## License
 
 MIT, see [LICENSE](LICENSE).
