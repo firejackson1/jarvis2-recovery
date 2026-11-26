@@ -11,6 +11,10 @@ root shell.
 By default, sideload uses the manufacturer's signing certificates. The optional
 sideload setup adds a certificate for packages you sign yourself.
 
+## Installation guide
+
+Follow the [Linux and Windows recovery runbook](docs/recovery-guide.md) for USB setup, a build-only checkpoint, flashing, and restoring stock recovery.
+
 ## Requirements
 
 - Bootloader already unlocked (`ro.boot.verifiedbootstate` = `orange`)
